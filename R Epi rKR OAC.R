@@ -47,6 +47,36 @@ good_age <- nrow(rk)
 
 # Create field to 'number' the revision procedure (revno)
 # Staged revisions are considered to be one procedure if: (a) ITT as staged and (b) second stage <365 days
+# However, we will ignore this initially and consider all procedures as independent
+
+# Group by nn_nid, side -> Sort by op_date -> Number sequence -> Then link back to primary if possible
+rk <- rk %>% arrange(nn_nid, side, op_date) %>% group_by(nn_nid, side) %>% mutate(seq = row_number())
+
+# Get primary keys (primary_njr_index_no, primary_procedure_id) AND fields to identify ops
+pk_id <- pk %>% select(nn_nid, side, primary_op_date, primary_njr_index_no, primary_procedure_id, patient_gender, age)
+
+# The first rKR has seq==1, so create this as a merge field
+pk_id <- pk_id %>% mutate(seq = 1)
+
+# Merge
+rk <- merge(rk, pk_id, by=c("nn_nid", "side", "seq"), all.x = TRUE)
+
+# The first revision with a linked primary should be labelled revno==1
+rk <- rk %>% mutate(dummy_revno = case_when(!is.na(primary_njr_index_no) ~ 1, TRUE ~ 0))
+
+# For a given nn_nid, side - Did the first rKR link to a primary?
+rk <- rk %>% group_by(nn_nid, side) %>% mutate(linked = max(dummy_revno))
+
+# If it did link, then revno == seq
+# Else, code it as 0
+rk <- rk %>% mutate(revno = case_when(linked ==1 ~ seq, TRUE ~ 0L))
+
+# Re-code as 0,1,2,3 and create factor
+rk <- rk %>% mutate(revno = case_when(revno >3 ~ 3L, TRUE ~ revno))
+
+rk$revno <- factor(rk$revno, levels=c(1,2,3,0), ordered=TRUE, labels = c("First linked rKR", "Second linked rKR", "Third or more linked rKR", "No linked primary"))
+
+## Now consider staged revisions to be one procedure if: (a) ITT as staged and (b) second stage <365 days
 
 rk <-
   rk %>% 
